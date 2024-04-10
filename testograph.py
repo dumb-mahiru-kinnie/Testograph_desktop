@@ -9,7 +9,7 @@ from base64 import b64encode
 class TestAPI:
     def __init__(self) -> None:
         self.answers_num = 0
-        self.api = GISTyc(auth_token='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')
+        self.api = GISTyc(auth_token='')
     def get_tests(self) -> dict:
         glist = self.api.get_gists()
         url = glist[0]['files']['tests.json']['raw_url']
