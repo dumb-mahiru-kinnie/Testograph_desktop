@@ -9,10 +9,12 @@ from base64 import b64encode
 class TestAPI:
     def __init__(self) -> None:
         self.answers_num = 0
+        self.version_num = '1.0.0'
         self.api = GISTyc(auth_token='')
+        self.gists = self.api.get_gists()
+        self.current_user = ''
     def get_tests(self) -> dict:
-        glist = self.api.get_gists()
-        url = glist[0]['files']['tests.json']['raw_url']
+        url = self.gists[2]['files']['tests.json']['raw_url']
         return loads(get(url).text)
     def send_test(self, test: dict) -> None:
         test['stars'] = '5'
@@ -20,6 +22,12 @@ class TestAPI:
             dumper.truncate(0)
             dump(test, dumper)
             #response = self.api.update_gist('tests.json')
+    def get_users(self) -> dict:
+        url = self.gists[1]['files']['users.json']['raw_url']
+        return loads(get(url).text)
+    def get_relevant_version(self) -> str:
+        url = self.gists[0]['files']['version.txt']['raw_url']
+        return get(url).text
 Testograph = TestAPI()
 
 def main(page: ft.Page):
@@ -146,7 +154,8 @@ def main(page: ft.Page):
         page.horizontal_alignment = 'CENTER'
         page.appbar.actions.extend([
             ft.IconButton(ft.icons.CREATE, on_click=partial(create_test)),
-            ft.IconButton(ft.icons.REFRESH, on_click=partial(update_tests))
+            ft.IconButton(ft.icons.REFRESH, on_click=partial(update_tests)),
+            ft.IconButton(ft.icons.KEY, on_click=partial(login))
         ])
         tabs = ft.Tabs(tabs=[ft.Tab(text='Тесты'), ft.Tab(text='Видео')])
         page.add(tabs)
@@ -157,6 +166,32 @@ def main(page: ft.Page):
             btn_list.append(ft.ElevatedButton(test['name'], on_click=partial(test_entry, current_test=test)))
         tabs.tabs[0].content = ft.GridView(controls=btn_list, expand=1, runs_count=5, max_extent=150, child_aspect_ratio=1.0, spacing=5, run_spacing=5)
         page.update()
+    def login(*e):
+        def check_login_data(e: ft.ControlEvent):
+            users = Testograph.get_users()
+            for user in users:
+                if username_fld.value == user['login'] and password_fld.value == user['password']:
+                    Testograph.current_user = user
+                    login()
+                else:
+                    page.snack_bar = ft.SnackBar(ft.Text('Неправильный логин или пароль!'), duration=1000, open=True)
+                    page.update()
+        clean_page()
+        if not Testograph.current_user:
+            username_fld = ft.TextField(label='Логин')
+            password_fld = ft.TextField(label='Пароль')
+            page.add(
+                ft.Text('Вход', theme_style=ft.TextThemeStyle.TITLE_LARGE),
+                username_fld,
+                password_fld,
+                ft.ElevatedButton('Войти', on_click=check_login_data)
+            )
+        else:
+            page.add(
+                ft.Text(Testograph.current_user['login']),
+                ft.Text(Testograph.current_user['date_of_joining']),
+                ft.Text(Testograph.current_user['is_admin'])
+            )
     def clean_page():
         page.clean()
         page.appbar = ft.AppBar(
@@ -341,6 +376,9 @@ def main(page: ft.Page):
     def _send_test(e: ft.ControlEvent, test: dict):
         Testograph.send_test(test)
         update_tests()
-    update_tests()
+    if Testograph.version_num == Testograph.get_relevant_version():
+        update_tests()
+    else:
+        page.add(ft.Text('Ваша версия Тестографа устарела. Пожалуйста, обновите.'))
 
 ft.app(target=main, name="testograph")
