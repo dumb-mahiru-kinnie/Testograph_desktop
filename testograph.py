@@ -1,33 +1,51 @@
 import flet as ft
 from gistyc import GISTyc
 from requests import get
-from json import loads, dump
+from json import loads, dumps
 from functools import partial
 from random import shuffle
 from base64 import b64encode
+from datetime import datetime
 
 class TestAPI:
     def __init__(self) -> None:
         self.answers_num = 0
         self.version_num = '1.0.0'
         self.api = GISTyc(auth_token='')
-        self.gists = self.api.get_gists()
-        self.current_user = ''
-    def get_tests(self) -> dict:
-        url = self.gists[2]['files']['tests.json']['raw_url']
-        return loads(get(url).text)
+        self.current_user = 'Аноним'
+    def get_tests(self) -> list:
+        bases = self.api.get_gists()
+        for i in range(len(bases)):
+            if 'tests.json' in bases[i]['files']:
+                return loads(get(bases[i]['files']['tests.json']['raw_url']).text)
     def send_test(self, test: dict) -> None:
         test['stars'] = '5'
-        with open('test.json', 'w+', encoding='utf-8') as dumper:
-            dumper.truncate(0)
-            dump(test, dumper)
-            #response = self.api.update_gist('tests.json')
-    def get_users(self) -> dict:
-        url = self.gists[1]['files']['users.json']['raw_url']
-        return loads(get(url).text)
+        test['creator'] = self.current_user
+        tests = self.get_tests()
+        tests.append(test)
+        with open('tests.json', 'w+') as dumper:
+            dumper.write(str(dumps(tests)))
+        self.api.update_gist('tests.json')
+        with open('tests.json', 'w+') as dumper:
+            dumper.write('')
+    def get_users(self) -> list:
+        bases = self.api.get_gists()
+        for i in range(len(bases)):
+            if 'users.json' in bases[i]['files']:
+                return loads(get(bases[i]['files']['users.json']['raw_url']).text)
+    def send_user(self, user: dict) -> None:
+        users = self.get_users()
+        users.append(user)
+        with open('users.json', 'w+') as dumper:
+            dumper.write(str(dumps(users)))
+        self.api.update_gist('users.json')
+        with open('users.json', 'w+') as dumper:
+            dumper.write('')
     def get_relevant_version(self) -> str:
-        url = self.gists[0]['files']['version.txt']['raw_url']
-        return get(url).text
+        bases = self.api.get_gists()
+        for i in range(len(bases)):
+            if 'version.txt' in bases[i]['files']:
+                return get(bases[i]['files']['version.txt']['raw_url']).text
 Testograph = TestAPI()
 
 def main(page: ft.Page):
@@ -36,6 +54,7 @@ def main(page: ft.Page):
         page.add(ft.Text(current_test['name']))
         page.add(ft.Image(current_test['image']))
         page.add(ft.Text(current_test['description']))
+        page.add(ft.Text(f'Создатель: {current_test['creator']}'))
         page.add(ft.Text(f'Звёздный рейтинг: {current_test['stars']}'))
         page.add(ft.ElevatedButton('Назад', on_click=partial(update_tests)))
         page.add(ft.ElevatedButton('Вперёд', on_click=partial(progress, current_test=current_test, chosen_answers=[None] * len(current_test['questions']))))
@@ -176,21 +195,43 @@ def main(page: ft.Page):
                 else:
                     page.snack_bar = ft.SnackBar(ft.Text('Неправильный логин или пароль!'), duration=1000, open=True)
                     page.update()
+        def logout(e: ft.ControlEvent):
+            Testograph.current_user = 'Аноним'
+            update_tests()
+        def register(e: ft.ControlEvent):
+            users = Testograph.get_users()
+            if username_fld.value not in [x['login'] for x in users]:
+                user = {
+                    'login': username_fld.value,
+                    'password': password_fld.value,
+                    'is_admin': False,
+                    'date_of_joining': datetime.today().strftime('%d.%m.%Y'),
+                    'created_tests': []
+                }
+                Testograph.send_user(user=user)
+                Testograph.current_user = user
+                login()
+            else:
+                page.snack_bar = ft.SnackBar(ft.Text('Уже есть такой пользователь!'), duration=1000, open=True)
+                page.update()
         clean_page()
-        if not Testograph.current_user:
+        if Testograph.current_user == 'Аноним':
             username_fld = ft.TextField(label='Логин')
             password_fld = ft.TextField(label='Пароль')
             page.add(
                 ft.Text('Вход', theme_style=ft.TextThemeStyle.TITLE_LARGE),
                 username_fld,
                 password_fld,
-                ft.ElevatedButton('Войти', on_click=check_login_data)
+                ft.ElevatedButton('Войти', on_click=check_login_data),
+                ft.ElevatedButton('Зарегистрироваться с введёнными данными', on_click=register)
             )
         else:
             page.add(
                 ft.Text(Testograph.current_user['login']),
                 ft.Text(Testograph.current_user['date_of_joining']),
-                ft.Text(Testograph.current_user['is_admin'])
+                ft.Text(Testograph.current_user['is_admin']),
+                ft.ElevatedButton('Назад', on_click=update_tests),
+                ft.ElevatedButton('Выйти', on_click=logout)
             )
     def clean_page():
         page.clean()
