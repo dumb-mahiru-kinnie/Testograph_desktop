@@ -11,20 +11,18 @@ class TestAPI:
     def __init__(self) -> None:
         self.answers_num = 0
         self.version_num = '1.0.0'
+        self.online = True
         self.api = GISTyc(auth_token='')
         self.current_user = 'Аноним'
-    def get_tests(self) -> list:
+        self.tests = []
+    def get_tests(self) -> None:
         bases = self.api.get_gists()
         for i in range(len(bases)):
             if 'tests.json' in bases[i]['files']:
-                return loads(get(bases[i]['files']['tests.json']['raw_url']).text)
-    def send_test(self, test: dict) -> None:
-        test['stars'] = '5'
-        test['creator'] = self.current_user
-        tests = self.get_tests()
-        tests.append(test)
+                Testograph.tests = loads(get(bases[i]['files']['tests.json']['raw_url']).text)
+    def send_tests(self) -> None:
         with open('tests.json', 'w+') as dumper:
-            dumper.write(str(dumps(tests)))
+            dumper.write(str(dumps(self.tests)))
         self.api.update_gist('tests.json')
         with open('tests.json', 'w+') as dumper:
             dumper.write('')
@@ -33,9 +31,7 @@ class TestAPI:
         for i in range(len(bases)):
             if 'users.json' in bases[i]['files']:
                 return loads(get(bases[i]['files']['users.json']['raw_url']).text)
-    def send_user(self, user: dict) -> None:
-        users = self.get_users()
-        users.append(user)
+    def send_users(self, users: list) -> None:
         with open('users.json', 'w+') as dumper:
             dumper.write(str(dumps(users)))
         self.api.update_gist('users.json')
@@ -51,13 +47,42 @@ Testograph = TestAPI()
 def main(page: ft.Page):
     def test_entry(e: ft.ControlEvent, current_test: dict):
         clean_page()
-        page.add(ft.Text(current_test['name']))
-        page.add(ft.Image(current_test['image']))
-        page.add(ft.Text(current_test['description']))
-        page.add(ft.Text(f'Создатель: {current_test['creator']}'))
-        page.add(ft.Text(f'Звёздный рейтинг: {current_test['stars']}'))
-        page.add(ft.ElevatedButton('Назад', on_click=partial(update_tests)))
-        page.add(ft.ElevatedButton('Вперёд', on_click=partial(progress, current_test=current_test, chosen_answers=[None] * len(current_test['questions']))))
+        page.add(
+            ft.Text(current_test['name']), 
+            ft.Image(current_test['image']), 
+            ft.Text(current_test['description']), 
+            ft.Text(f'Создатель: {current_test['creator']}'), 
+            ft.Text(f'Звёздный рейтинг: {current_test['stars']}'),
+            ft.ElevatedButton('Назад', on_click=partial(update_tests)),
+            ft.ElevatedButton('Вперёд', on_click=partial(progress, current_test=current_test, chosen_answers=[None] * len(current_test['questions'])))
+        )
+        if Testograph.current_user != 'Аноним':
+            if Testograph.current_user['is_admin']:
+                def open_dialog(e: ft.ControlEvent):
+                    page.dialog = dlg
+                    dlg.open = True
+                    page.update()
+                def dismiss_dialog(e: ft.ControlEvent):
+                    dlg.open = False
+                    page.update()
+                def delete_test(e: ft.ControlEvent, test: dict):
+                    dlg.open = False
+                    Testograph.tests.remove(test)
+                    Testograph.send_tests()
+                    page.snack_bar = ft.SnackBar(ft.Text(f'Тест {test['name']} удалён навсегда.'), duration=1000, open=True)
+                    page.update()
+                    update_tests()
+                page.add(ft.ElevatedButton('Удалить тест', on_click=open_dialog))
+                dlg = ft.AlertDialog(
+                    modal=True, 
+                    title=ft.Text('Модерация'), 
+                    content=ft.Text(f'Вы уверены, что хотите удалить тест {current_test['name']}? Это действие НЕЛЬЗЯ отменить.'),
+                    actions=[
+                        ft.TextButton('Да', on_click=partial(delete_test, test=current_test)),
+                        ft.TextButton('Нет', on_click=dismiss_dialog)
+                    ]
+                )
+
     def progress(e: ft.ControlEvent, current_test: dict, chosen_answers: list, num_current_q:int=0):
         clean_page()
         current_q = current_test['questions'][num_current_q]
@@ -172,15 +197,15 @@ def main(page: ft.Page):
         clean_page()
         page.horizontal_alignment = 'CENTER'
         page.appbar.actions.extend([
-            ft.IconButton(ft.icons.CREATE, on_click=partial(create_test)),
-            ft.IconButton(ft.icons.REFRESH, on_click=partial(update_tests)),
-            ft.IconButton(ft.icons.KEY, on_click=partial(login))
+            ft.IconButton(ft.icons.CREATE, on_click=create_test),
+            ft.IconButton(ft.icons.REFRESH, on_click=update_tests),
+            ft.IconButton(ft.icons.KEY, on_click=login)
         ])
         tabs = ft.Tabs(tabs=[ft.Tab(text='Тесты'), ft.Tab(text='Видео')])
         page.add(tabs)
-        tests = Testograph.get_tests()
         btn_list = []
-        for test in tests:
+        Testograph.get_tests()
+        for test in Testograph.tests:
             btn_list.append(ft.Image(src=test['image']))
             btn_list.append(ft.ElevatedButton(test['name'], on_click=partial(test_entry, current_test=test)))
         tabs.tabs[0].content = ft.GridView(controls=btn_list, expand=1, runs_count=5, max_extent=150, child_aspect_ratio=1.0, spacing=5, run_spacing=5)
@@ -192,9 +217,10 @@ def main(page: ft.Page):
                 if username_fld.value == user['login'] and password_fld.value == user['password']:
                     Testograph.current_user = user
                     login()
-                else:
-                    page.snack_bar = ft.SnackBar(ft.Text('Неправильный логин или пароль!'), duration=1000, open=True)
-                    page.update()
+                    break
+            else:
+                page.snack_bar = ft.SnackBar(ft.Text('Неправильный логин или пароль!'), duration=1000, open=True)
+                page.update()
         def logout(e: ft.ControlEvent):
             Testograph.current_user = 'Аноним'
             update_tests()
@@ -205,10 +231,10 @@ def main(page: ft.Page):
                     'login': username_fld.value,
                     'password': password_fld.value,
                     'is_admin': False,
-                    'date_of_joining': datetime.today().strftime('%d.%m.%Y'),
-                    'created_tests': []
+                    'date_of_joining': datetime.today().strftime('%d.%m.%Y')
                 }
-                Testograph.send_user(user=user)
+                users.append(user)
+                Testograph.send_users(users=users)
                 Testograph.current_user = user
                 login()
             else:
@@ -226,10 +252,18 @@ def main(page: ft.Page):
                 ft.ElevatedButton('Зарегистрироваться с введёнными данными', on_click=register)
             )
         else:
+            btn_list = []
+            tests_by_user = [test for test in Testograph.tests if test['creator'] == Testograph.current_user['login']]
+            for test in tests_by_user:
+                btn_list.extend([
+                    ft.Image(src=test['image']),
+                    ft.ElevatedButton(test['name'], on_click=partial(test_entry, current_test=test))
+                ])
             page.add(
                 ft.Text(Testograph.current_user['login']),
                 ft.Text(Testograph.current_user['date_of_joining']),
                 ft.Text(Testograph.current_user['is_admin']),
+                ft.GridView(controls=btn_list, expand=1, runs_count=5, max_extent=150, child_aspect_ratio=1.0, spacing=5, run_spacing=5),
                 ft.ElevatedButton('Назад', on_click=update_tests),
                 ft.ElevatedButton('Выйти', on_click=logout)
             )
@@ -396,7 +430,6 @@ def main(page: ft.Page):
                             if len(test['questions'][pos]['answers']['right_answers']) == column.controls.index(e.control):
                                 test['questions'][pos]['answers']['right_answers'].append(e.control.value)
                             else:
-                                print(test['questions'][pos]['answers']['right_answers'])
                                 test['questions'][pos]['answers']['right_answers'][column.controls.index(e.control)] = e.control.value
                         column.controls.append(ft.TextField(on_change=entry_changed))
                     case _:
@@ -415,7 +448,13 @@ def main(page: ft.Page):
             ])
             page.update()
     def _send_test(e: ft.ControlEvent, test: dict):
-        Testograph.send_test(test)
+        test['stars'] = '5'
+        if Testograph.current_user != 'Аноним':
+            test['creator'] = Testograph.current_user['login']
+        else:
+            test['creator'] = 'Аноним'
+        Testograph.tests.append(test)
+        Testograph.send_tests()
         update_tests()
     if Testograph.version_num == Testograph.get_relevant_version():
         update_tests()
